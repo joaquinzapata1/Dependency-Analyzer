@@ -3,8 +3,6 @@ const csv = require("csvtojson");
 const fetch = require("node-fetch");
 const parse = require("node-html-parser").parse;
 
-let path = "./websites.csv";
-
 function getFileName(url) {
   url = url.substring(
     0,
@@ -18,6 +16,7 @@ function getFileName(url) {
 
   return url;
 }
+
 async function getSrc(doc) {
   let scripts = doc.querySelectorAll("script");
   scripts = scripts
@@ -31,7 +30,8 @@ async function getSrc(doc) {
     .filter(Boolean);
   return scripts;
 }
-async function getSiteDependencies(name, text) {
+
+async function getSiteDependenciesAndPrint(name, text) {
   const doc = await parse(text);
   let fileNames = await getSrc(doc);
   console.log(`${name}: ${text.length} bytes`);
@@ -39,8 +39,9 @@ async function getSiteDependencies(name, text) {
   return fileNames;
 }
 
-async function getFrequency() {
-  let dependencies = await analyzeFile();
+async function getFrequency(path) {
+  const readFile = await readCsvFile(path);
+  const dependencies = await analyzeFile(readFile);
   return new Map(
     [...new Set(dependencies)].map(x => [
       x,
@@ -49,8 +50,7 @@ async function getFrequency() {
   );
 }
 
-async function analyzeFile() {
-  let file = await csv().fromFile(path);
+async function analyzeFile(file) {
   let deps = await Promise.all(
     file.map(async f =>
       f.url.startsWith("http") ? await fromHttp(f) : await fromLocalFile(f)
@@ -61,15 +61,20 @@ async function analyzeFile() {
 
 async function fromLocalFile(file) {
   let r = fs.readFileSync(file.url, { encoding: "utf8" });
-  return getSiteDependencies(file.name, r);
+  return getSiteDependenciesAndPrint(file.name, r);
 }
 
 async function fromHttp(site) {
   let website = await fetch(site.url);
   website = await website.text();
-  return getSiteDependencies(site.name, website);
+  return getSiteDependenciesAndPrint(site.name, website);
+}
+
+async function readCsvFile(path) {
+  return csv().fromFile(path);
 }
 
 (async () => {
-  console.log("Frequency", await getFrequency());
+  const file = "./websites.csv";
+  console.log("Frequency", await getFrequency(file));
 })();
