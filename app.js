@@ -4,7 +4,6 @@ const fetch = require("node-fetch");
 const parse = require("node-html-parser").parse;
 
 let path = "./websites.csv";
-let deps = [];
 
 function getFileName(url) {
   url = url.substring(
@@ -19,12 +18,9 @@ function getFileName(url) {
 
   return url;
 }
-
-async function getSiteDependencies(name, text) {
-  const doc = parse(text);
+async function getSrc(doc) {
   let scripts = doc.querySelectorAll("script");
-
-  let dependencies = scripts
+  scripts = scripts
     .map(e => {
       if (e.attributes.src) {
         let src = e.attributes.src;
@@ -33,41 +29,47 @@ async function getSiteDependencies(name, text) {
       }
     })
     .filter(Boolean);
+  return scripts;
+}
+async function getSiteDependencies(name, text) {
+  const doc = await parse(text);
+  let fileNames = await getSrc(doc);
   console.log(`${name}: ${text.length} bytes`);
-  console.log(`${name} dependencies:\n  ${dependencies.join("\n  ")}\n`);
-  deps = [...deps, ...dependencies];
+  console.log(`${name} dependencies:\n  ${fileNames.join("\n  ")}\n`);
+  return fileNames;
 }
 
-function getFrequency(arr) {
+async function getFrequency() {
+  let dependencies = await analyzeFile();
   return new Map(
-    [...new Set(arr)].map(x => [x, arr.filter(y => y === x).length])
+    [...new Set(dependencies)].map(x => [
+      x,
+      dependencies.filter(y => y === x).length
+    ])
   );
 }
 
 async function analyzeFile() {
   let file = await csv().fromFile(path);
-  file.map(f => {
-    if (f.url.startsWith("http")) fromHttp(f);
-    else fromLocalFile(f);
-  });
+  let deps = await Promise.all(
+    file.map(async f =>
+      f.url.startsWith("http") ? await fromHttp(f) : await fromLocalFile(f)
+    )
+  );
+  return deps.flat();
 }
 
-function fromLocalFile(file) {
-  fs.readFile(file.url, "utf8", async (e, r) => {
-    if (e) throw e;
-    getSiteDependencies(file.name, r);
-  });
+async function fromLocalFile(file) {
+  let r = fs.readFileSync(file.url, { encoding: "utf8" });
+  return getSiteDependencies(file.name, r);
 }
 
 async function fromHttp(site) {
   let website = await fetch(site.url);
   website = await website.text();
-  getSiteDependencies(site.name, website);
+  return getSiteDependencies(site.name, website);
 }
 
-(() => {
-  analyzeFile();
-  setTimeout(() => {
-    console.log("Frequency", getFrequency(deps));
-  }, 3000);
+(async () => {
+  console.log("Frequency", await getFrequency());
 })();
