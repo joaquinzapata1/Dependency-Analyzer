@@ -20,61 +20,54 @@ function getFileName(url) {
   return url;
 }
 
-function getSiteDependencies(name, text) {
+async function getSiteDependencies(name, text) {
   const doc = parse(text);
-  let dependencies = [];
-
   let scripts = doc.querySelectorAll("script");
 
-  scripts.map(e => {
-    if (e.attributes.src) {
-      let src = e.attributes.src;
-      let fileName = getFileName(src);
-      dependencies.push(fileName);
-      deps.push(fileName);
-    }
-  });
+  let dependencies = scripts
+    .map(e => {
+      if (e.attributes.src) {
+        let src = e.attributes.src;
+        let fileName = getFileName(src);
+        return fileName;
+      }
+    })
+    .filter(Boolean);
   console.log(`${name}: ${text.length} bytes`);
-  console.log(`${name} dependencies:\n  ${dependencies.join("\n  ")}`);
+  console.log(`${name} dependencies:\n  ${dependencies.join("\n  ")}\n`);
+  deps = [...deps, ...dependencies];
 }
 
 function getFrequency(arr) {
-  const count = new Map(
+  return new Map(
     [...new Set(arr)].map(x => [x, arr.filter(y => y === x).length])
   );
-  return count;
 }
 
-function analyzeFile() {
-  csv()
-    .fromFile(path)
-    .then(obj => {
-      obj.map(o => {
-        if (o.url.startsWith("http")) {
-          fetch(o.url).then(
-            r => {
-              r.text()
-                .then(t => {
-                  getSiteDependencies(o.name, t);
-                })
-                .catch(e => console.log(e));
-            },
-            e => {
-              console.log(e.toString());
-            }
-          );
-        } else {
-          fs.readFile(o.url, "utf8", (e, r) => {
-            if (e) throw e;
-            getSiteDependencies(o.name, r);
-          });
-        }
-      });
-    })
-    .then(() => setTimeout(() => console.log(getFrequency(deps)), 2500))
-    .catch(e => {
-      console.log(e.toString());
-    });
+async function analyzeFile() {
+  let file = await csv().fromFile(path);
+  file.map(f => {
+    if (f.url.startsWith("http")) fromHttp(f);
+    else fromLocalFile(f);
+  });
 }
 
-analyzeFile();
+function fromLocalFile(file) {
+  fs.readFile(file.url, "utf8", async (e, r) => {
+    if (e) throw e;
+    getSiteDependencies(file.name, r);
+  });
+}
+
+async function fromHttp(site) {
+  let website = await fetch(site.url);
+  website = await website.text();
+  getSiteDependencies(site.name, website);
+}
+
+(() => {
+  analyzeFile();
+  setTimeout(() => {
+    console.log("Frequency", getFrequency(deps));
+  }, 3000);
+})();
