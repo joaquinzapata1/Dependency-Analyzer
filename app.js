@@ -3,9 +3,6 @@ const csv = require("csvtojson");
 const fetch = require("node-fetch");
 const parse = require("node-html-parser").parse;
 
-let path = "./websites.csv";
-let deps = [];
-
 function getFileName(url) {
   url = url.substring(
     0,
@@ -20,61 +17,64 @@ function getFileName(url) {
   return url;
 }
 
-function getSiteDependencies(name, text) {
-  const doc = parse(text);
-  let dependencies = [];
-
+async function getSrc(doc) {
   let scripts = doc.querySelectorAll("script");
-
-  scripts.map(e => {
-    if (e.attributes.src) {
-      let src = e.attributes.src;
-      let fileName = getFileName(src);
-      dependencies.push(fileName);
-      deps.push(fileName);
-    }
-  });
-  console.log(`${name}: ${text.length} bytes`);
-  console.log(`${name} dependencies:\n  ${dependencies.join("\n  ")}`);
-}
-
-function getFrequency(arr) {
-  const count = new Map(
-    [...new Set(arr)].map(x => [x, arr.filter(y => y === x).length])
-  );
-  return count;
-}
-
-function analyzeFile() {
-  csv()
-    .fromFile(path)
-    .then(obj => {
-      obj.map(o => {
-        if (o.url.startsWith("http")) {
-          fetch(o.url).then(
-            r => {
-              r.text()
-                .then(t => {
-                  getSiteDependencies(o.name, t);
-                })
-                .catch(e => console.log(e));
-            },
-            e => {
-              console.log(e.toString());
-            }
-          );
-        } else {
-          fs.readFile(o.url, "utf8", (e, r) => {
-            if (e) throw e;
-            getSiteDependencies(o.name, r);
-          });
-        }
-      });
+  scripts = scripts
+    .map(e => {
+      if (e.attributes.src) {
+        let src = e.attributes.src;
+        let fileName = getFileName(src);
+        return fileName;
+      }
     })
-    .then(() => setTimeout(() => console.log(getFrequency(deps)), 2500))
-    .catch(e => {
-      console.log(e.toString());
-    });
+    .filter(Boolean);
+  return scripts;
 }
 
-analyzeFile();
+async function getSiteDependenciesAndPrint(name, text) {
+  const doc = await parse(text);
+  let fileNames = await getSrc(doc);
+  console.log(`${name}: ${text.length} bytes`);
+  console.log(`${name} dependencies:\n  ${fileNames.join("\n  ")}\n`);
+  return fileNames;
+}
+
+async function getFrequency(path) {
+  const readFile = await readCsvFile(path);
+  const dependencies = await analyzeFile(readFile);
+  return new Map(
+    [...new Set(dependencies)].map(x => [
+      x,
+      dependencies.filter(y => y === x).length
+    ])
+  );
+}
+
+async function analyzeFile(file) {
+  let deps = await Promise.all(
+    file.map(async f =>
+      f.url.startsWith("http") ? fromHttp(f) : fromLocalFile(f)
+    )
+  );
+  return deps.flat();
+}
+
+async function fromLocalFile(file) {
+  let r = fs.readFileSync(file.url, { encoding: "utf8" });
+  return getSiteDependenciesAndPrint(file.name, r);
+}
+
+async function fromHttp(site) {
+  let website = await fetch(site.url);
+  website = await website.text();
+  return getSiteDependenciesAndPrint(site.name, website);
+}
+
+async function readCsvFile(path) {
+  return csv().fromFile(path);
+}
+
+(async () => {
+  const file = "./websites.csv";
+  console.log("Frequency", await getFrequency(file));
+})();
